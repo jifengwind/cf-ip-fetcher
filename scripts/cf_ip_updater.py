@@ -70,33 +70,53 @@ def fetch_table_data():
         WebDriverWait(driver, 30).until(
             EC.presence_of_element_located((By.TAG_NAME, "table"))
         )
-        time.sleep(3)  # 额外等待确保数据完全渲染
+        time.sleep(3)
         
-        # 获取表格所有行（跳过表头）
+        # 获取表格所有行
         table = driver.find_element(By.TAG_NAME, "table")
-        rows = table.find_elements(By.TAG_NAME, "tr")[1:]
+        rows = table.find_elements(By.TAG_NAME, "tr")
+        
+        log(f"总共找到 {len(rows)} 行（含表头）")
+        
+        # 跳过表头（第一行）
+        data_rows = rows[1:]
         
         candidates = []
         seen_ips = set()
         
-        log(f"找到 {len(rows)} 行数据")
+        # 调试：打印前3行的列数和内容
+        for i, row in enumerate(data_rows[:3]):
+            cols = row.find_elements(By.TAG_NAME, "td")
+            log(f"调试：第 {i+1} 行有 {len(cols)} 列")
+            if len(cols) >= 6:
+                log(f"  列1(线路): '{cols[1].text.strip()}'")
+                log(f"  列2(IP): '{cols[2].text.strip()}'")
+                log(f"  列3(丢包): '{cols[3].text.strip()}'")
+                log(f"  列4(延迟): '{cols[4].text.strip()}'")
+                log(f"  列5(速度): '{cols[5].text.strip()}'")
         
-        for row in rows:
+        for row in data_rows:
             try:
                 cols = row.find_elements(By.TAG_NAME, "td")
+                
+                # 跳过列数不足的行
                 if len(cols) < 6:
                     continue
                 
-                # 解析各列数据
-                # 表格结构：序号 | 线路 | IP | 丢包 | 延迟 | 速度 | 带宽 | Colo | 时间
-                line_type = cols[1].text.strip()      # 线路类型
-                ip = cols[2].text.strip()             # IP 地址
-                loss_text = cols[3].text.strip()      # 丢包率
-                latency_text = cols[4].text.strip()   # 延迟
-                speed_text = cols[5].text.strip()     # 速度
+                # 表格结构：
+                # 0:序号 | 1:线路 | 2:IP | 3:丢包 | 4:延迟 | 5:速度 | 6:带宽 | 7:Colo | 8:时间
+                line_type = cols[1].text.strip()
+                ip = cols[2].text.strip()
+                loss_text = cols[3].text.strip()
+                latency_text = cols[4].text.strip()
+                speed_text = cols[5].text.strip()
                 
                 # 跳过 IPv6
                 if ':' in ip:
+                    continue
+                
+                # 跳过空 IP
+                if not ip:
                     continue
                 
                 # 解析数值
@@ -111,9 +131,14 @@ def fetch_table_data():
                     latency = 999
                 
                 try:
-                    speed = float(speed_text.replace('mb/s', '').replace('MB/s', ''))
+                    speed = float(speed_text.lower().replace('mb/s', '').replace('mb', ''))
                 except:
                     speed = 0
+                
+                # 调试：打印第一行的解析结果和筛选条件检查
+                if len(candidates) == 0 and len(seen_ips) == 0:
+                    log(f"调试：解析第一行 - IP:{ip}, 线路:{line_type}, 丢包:{loss}, 延迟:{latency}, 速度:{speed}")
+                    log(f"  筛选条件检查: 丢包>0 = {loss>0}, 延迟>{MAX_LATENCY} = {latency>MAX_LATENCY}, 速度<{MIN_SPEED} = {speed<MIN_SPEED}")
                 
                 # 筛选条件
                 if loss > 0:
@@ -140,6 +165,7 @@ def fetch_table_data():
             except Exception as e:
                 continue
         
+        log(f"最终筛选出 {len(candidates)} 个候选 IP")
         return candidates
         
     finally:
