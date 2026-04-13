@@ -180,7 +180,7 @@ def main():
     if not candidates:
         log("⚠️ 警告：未找到符合条件的 IP")
         os.makedirs(os.path.dirname(OUTPUT_FILE), exist_ok=True)
-        with open(OUTPUT_FILE, 'w', encoding='ascii') as f:
+        with open(OUTPUT_FILE, 'w', encoding='utf-8') as f:
             f.write("# No IPs found matching criteria\n")
         sys.exit(0)
     
@@ -193,7 +193,7 @@ def main():
         log(f"📌 {c['ip']:15} [{c['isp']:6}] 延迟: {c['latency']:6.1f}ms  速度: {c['speed']:6.1f}mb/s  得分: {c['score']:.3f}")
     
     os.makedirs(os.path.dirname(OUTPUT_FILE), exist_ok=True)
-    with open(OUTPUT_FILE, 'w', encoding='ascii') as f:
+    with open(OUTPUT_FILE, 'w', encoding='utf-8') as f:
         f.write('\n'.join(lines))
     
     log("=" * 50)
