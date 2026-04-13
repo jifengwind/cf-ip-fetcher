@@ -69,7 +69,7 @@ jobs:
           
           # 检查是否有变化
           if git diff --cached --quiet; then
-            echo "文件内容无变化，但强制提交以同步远程仓库"
+            echo "文件内容无变化，但强制提交以同步远程仓库" 
             git commit --allow-empty -m "🔄 Auto-update: preferred IPs (force sync) [$(date +'%Y-%m-%d %H:%M UTC')]"
           else
             git commit -m "🔄 Auto-update: preferred IPs [$(date +'%Y-%m-%d %H:%M UTC')]"
