@@ -45,7 +45,6 @@ def create_driver():
     options.add_experimental_option('useAutomationExtension', False)
     options.add_argument('--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
     options.add_argument('--log-level=3')
-    options.add_argument('--silent')
     
     service = Service('/usr/local/bin/chromedriver')
     return webdriver.Chrome(service=service, options=options)
@@ -68,73 +67,53 @@ def fetch_table_data():
         
         log(f"总共找到 {len(rows)} 行")
         
-        # 分析表头，确定各列的位置
-        header_row = rows[0]
-        header_cells = header_row.find_elements(By.TAG_NAME, "th")
-        if not header_cells:
-            header_cells = header_row.find_elements(By.TAG_NAME, "td")
-        
-        # 打印表头，用于调试
-        header_texts = [cell.text.strip() for cell in header_cells]
-        log(f"表头列数: {len(header_texts)}")
-        log(f"表头内容: {header_texts}")
-        
-        # 找出关键列的索引
-        ip_idx = None
-        latency_idx = None
-        speed_idx = None
-        isp_idx = None
-        
-        for i, text in enumerate(header_texts):
-            if 'IP' in text or 'ip' in text:
-                ip_idx = i
-            elif '延迟' in text or 'latency' in text.lower():
-                latency_idx = i
-            elif '速度' in text or 'speed' in text.lower():
-                speed_idx = i
-            elif '线路' in text or 'isp' in text.lower():
-                isp_idx = i
-        
-        # 如果没有"线路"列，则通过其他方式判断
-        if isp_idx is None:
-            log("未找到'线路'列，将使用 IP 段经验判断运营商")
-        
-        log(f"列索引: IP={ip_idx}, 延迟={latency_idx}, 速度={speed_idx}, 线路={isp_idx}")
-        
         candidates = []
         seen_ips = set()
+        first_valid_row = True
         
         for row in rows[1:]:  # 跳过表头
             try:
                 cells = row.find_elements(By.TAG_NAME, "td")
-                if len(cells) < max([idx for idx in [ip_idx, latency_idx, speed_idx] if idx is not None]) + 1:
+                
+                # 数据行实际是 8 列（缺少序号列）
+                # 列顺序: 0:线路, 1:IP, 2:丢包, 3:延迟, 4:速度, 5:带宽, 6:Colo, 7:时间
+                if len(cells) < 8:
                     continue
                 
-                # 提取 IP
-                ip = cells[ip_idx].text.strip() if ip_idx is not None else ''
-                if ':' in ip or not ip:
+                line_type = cells[0].text.strip()
+                ip = cells[1].text.strip()
+                loss_text = cells[2].text.strip()
+                latency_text = cells[3].text.strip()
+                speed_text = cells[4].text.strip()
+                
+                # 跳过 IPv6
+                if ':' in ip:
                     continue
                 
-                # 提取线路（如果有）
-                isp = cells[isp_idx].text.strip() if isp_idx is not None else '多线'
+                # 跳过空 IP
+                if not ip or ip == '':
+                    continue
                 
-                # 提取延迟
-                latency_text = cells[latency_idx].text.strip() if latency_idx is not None else ''
+                # 验证是否为有效 IP 格式
+                if not any(c.isdigit() for c in ip):
+                    continue
+                
+                # 解析延迟
                 try:
                     latency = float(latency_text.replace('ms', '').strip())
                 except:
                     latency = 999
                 
-                # 提取速度
-                speed_text = cells[speed_idx].text.strip() if speed_idx is not None else ''
+                # 解析速度
                 try:
                     speed = float(speed_text.lower().replace('mb/s', '').replace('mb', '').strip())
                 except:
                     speed = 0
                 
-                # 调试第一行
-                if len(candidates) == 0 and len(seen_ips) == 0:
-                    log(f"调试：第一行解析 - IP:{ip}, 线路:{isp}, 延迟:{latency}, 速度:{speed}")
+                # 第一行调试
+                if first_valid_row:
+                    log(f"调试：第一行数据 - 线路:'{line_type}', IP:'{ip}', 延迟:'{latency_text}'->{latency}, 速度:'{speed_text}'->{speed}")
+                    first_valid_row = False
                 
                 # 筛选条件
                 if latency > MAX_LATENCY:
@@ -146,11 +125,14 @@ def fetch_table_data():
                 
                 seen_ips.add(ip)
                 
+                # 线路类型处理
+                isp = line_type if line_type not in ['IPV6', ''] else '多线'
+                
                 candidates.append({
                     'ip': ip,
                     'latency': latency,
                     'speed': speed,
-                    'isp': isp if isp not in ['IPV6', ''] else '多线'
+                    'isp': isp
                 })
                 
             except Exception as e:
