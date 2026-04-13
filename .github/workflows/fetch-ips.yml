@@ -9,6 +9,7 @@ on:
       - main
     paths:
       - 'scripts/cf_ip_updater.py'
+      - 'scripts/install_chromedriver.py'
       - '.github/workflows/fetch-ips.yml'
 
 permissions:
@@ -42,36 +43,13 @@ jobs:
 
       - name: Install ChromeDriver
         run: |
-          CHROME_VERSION=$(google-chrome --version | grep -oP '\d+\.\d+\.\d+\.\d+')
-          CHROME_MAJOR_VERSION=$(echo $CHROME_VERSION | cut -d. -f1)
-          CHROMEDRIVER_URL=$(wget -q -O - "https://googlechromelabs.github.io/chrome-for-testing/latest-patch-versions-per-build-with-downloads.json" | python3 -c "
-import json, sys
-data = json.load(sys.stdin)
-builds = data['builds']
-target_version = '$CHROME_VERSION'
-for build, info in builds.items():
-    if info['version'] == target_version:
-        for d in info['downloads']['chromedriver']:
-            if d['platform'] == 'linux64':
-                print(d['url'])
-                sys.exit(0)
-")
-          if [ -z "$CHROMEDRIVER_URL" ]; then
-            CHROMEDRIVER_URL=$(wget -q -O - "https://googlechromelabs.github.io/chrome-for-testing/latest-versions-per-milestone-with-downloads.json" | python3 -c "
-import json, sys
-data = json.load(sys.stdin)
-milestones = data['milestones']
-chrome_major = '$CHROME_MAJOR_VERSION'
-if chrome_major in milestones:
-    for d in milestones[chrome_major]['downloads']['chromedriver']:
-        if d['platform'] == 'linux64':
-            print(d['url'])
-")
-          fi
+          CHROMEDRIVER_URL=$(python3 scripts/install_chromedriver.py)
+          echo "下载地址: $CHROMEDRIVER_URL"
           wget -O /tmp/chromedriver.zip "$CHROMEDRIVER_URL"
           unzip -o /tmp/chromedriver.zip -d /tmp/
           sudo mv /tmp/chromedriver-linux64/chromedriver /usr/local/bin/chromedriver
           sudo chmod +x /usr/local/bin/chromedriver
+          chromedriver --version
 
       - name: Create output directory
         run: mkdir -p output
