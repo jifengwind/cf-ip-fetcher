@@ -63,13 +63,19 @@ jobs:
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          if git diff --quiet output/cf_preferred_ips.txt; then
-            echo "IP 列表无变化，跳过提交"
+          
+          # 强制添加文件
+          git add output/cf_preferred_ips.txt
+          
+          # 检查是否有变化
+          if git diff --cached --quiet; then
+            echo "文件内容无变化，但强制提交以同步远程仓库"
+            git commit --allow-empty -m "🔄 Auto-update: preferred IPs (force sync) [$(date +'%Y-%m-%d %H:%M UTC')]"
           else
-            git add output/cf_preferred_ips.txt
             git commit -m "🔄 Auto-update: preferred IPs [$(date +'%Y-%m-%d %H:%M UTC')]"
-            git push
           fi
+          
+          git push
 
       - name: Upload IP list as artifact
         uses: actions/upload-artifact@v4
