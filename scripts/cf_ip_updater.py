@@ -3,14 +3,12 @@
 """
 Cloudflare 优选 IP 抓取脚本（Selenium 版本）
 适配 GitHub Actions 环境
-包含自动补救机制：检测到文件过旧时自动触发下一次 workflow
 """
 
 import os
 import sys
 import time
-import requests
-from datetime import datetime, timedelta
+from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
@@ -25,9 +23,6 @@ TARGET_PORT = "443"
 MAX_RESULTS = 40
 MAX_LATENCY = 300   # 最大延迟 300ms
 MIN_SPEED = 5       # 最低速度 5mb/s
-
-# --- 新增：补救机制配置 ---
-CHECK_INTERVAL_MINUTES = 30  # 超过此时间未更新则触发补救（与 cron 频率保持一致）
 
 
 def log(msg):
@@ -166,75 +161,11 @@ def sort_by_score(candidates):
     return sorted(candidates, key=lambda x: -x['score'])
 
 
-# ========== 新增：自动补救逻辑 ==========
-def get_file_age_minutes():
-    """获取输出文件的存在时间（分钟），如果文件不存在返回 -1"""
-    if not os.path.exists(OUTPUT_FILE):
-        return -1
-    
-    mtime = datetime.fromtimestamp(os.path.getmtime(OUTPUT_FILE))
-    age = datetime.now() - mtime
-    return age.total_seconds() / 60
-
-
-def should_trigger_remedy():
-    """检查是否需要补救触发"""
-    age_minutes = get_file_age_minutes()
-    
-    if age_minutes < 0:
-        log(f"⚠️ {OUTPUT_FILE} 不存在")
-        return True
-    
-    log(f"📁 文件年龄: {age_minutes:.1f} 分钟")
-    
-    if age_minutes > CHECK_INTERVAL_MINUTES:
-        log(f"⚠️ 文件超过 {CHECK_INTERVAL_MINUTES} 分钟未更新（实际 {age_minutes:.1f} 分钟），触发补救")
-        return True
-    
-    return False
-
-
-def trigger_workflow():
-    """通过 GitHub API 手动触发下一次 workflow"""
-    github_token = os.environ.get("GITHUB_TOKEN")
-    github_repo = os.environ.get("GITHUB_REPOSITORY")
-    
-    if not github_token or not github_repo:
-        log("❌ 无法获取 GITHUB_TOKEN 或 GITHUB_REPOSITORY 环境变量，跳过补救触发")
-        return False
-    
-    workflow_file = "fetch-ips.yml"
-    
-    url = f"https://api.github.com/repos/{github_repo}/actions/workflows/{workflow_file}/dispatches"
-    headers = {
-        "Authorization": f"token {github_token}",
-        "Accept": "application/vnd.github.v3+json"
-    }
-    payload = {"ref": "main"}
-    
-    try:
-        response = requests.post(url, headers=headers, json=payload, timeout=10)
-        if response.status_code == 204:
-            log("✅ 补救触发成功：已手动触发下一次 workflow")
-            return True
-        else:
-            log(f"❌ 补救触发失败: HTTP {response.status_code} - {response.text}")
-            return False
-    except Exception as e:
-        log(f"❌ 补救触发异常: {e}")
-        return False
-
-
 def main():
     log("=" * 50)
     log("开始获取 Cloudflare 优选 IP（GitHub Actions + Selenium）")
     log(f"筛选条件: 延迟 ≤ {MAX_LATENCY}ms, 速度 ≥ {MIN_SPEED}mb/s")
     log("=" * 50)
-    
-    # 记录抓取前的文件状态
-    old_age = get_file_age_minutes()
-    if old_age >= 0:
-        log(f"📁 抓取前文件年龄: {old_age:.1f} 分钟")
     
     try:
         candidates = fetch_table_data()
@@ -250,30 +181,24 @@ def main():
         log("⚠️ 警告：未找到符合条件的 IP")
         os.makedirs(os.path.dirname(OUTPUT_FILE), exist_ok=True)
         with open(OUTPUT_FILE, 'w', encoding='utf-8') as f:
-            f.write(f"# No IPs found matching criteria at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-    else:
-        top_ips = sort_by_score(candidates)[:MAX_RESULTS]
-        
-        lines = []
-        for c in top_ips:
-            line = f"{c['ip']}:{TARGET_PORT}#{c['isp']}"
-            lines.append(line)
-            log(f"📌 {c['ip']:15} [{c['isp']:6}] 延迟: {c['latency']:6.1f}ms  速度: {c['speed']:6.1f}mb/s  得分: {c['score']:.3f}")
-        
-        os.makedirs(os.path.dirname(OUTPUT_FILE), exist_ok=True)
-        with open(OUTPUT_FILE, 'w', encoding='utf-8') as f:
-            f.write('\n'.join(lines))
-        
-        log("=" * 50)
-        log(f"🎉 成功！已将 {len(lines)} 个 IP 写入 {OUTPUT_FILE}")
-        log("=" * 50)
+            f.write("# No IPs found matching criteria\n")
+        sys.exit(0)
     
-    # ========== 新增：补救触发 ==========
-    if should_trigger_remedy():
-        log("🔄 检测到文件状态异常，尝试补救...")
-        trigger_workflow()
-    else:
-        log("✅ 文件更新正常，无需补救")
+    top_ips = sort_by_score(candidates)[:MAX_RESULTS]
+    
+    lines = []
+    for c in top_ips:
+        line = f"{c['ip']}:{TARGET_PORT}#{c['isp']}"
+        lines.append(line)
+        log(f"📌 {c['ip']:15} [{c['isp']:6}] 延迟: {c['latency']:6.1f}ms  速度: {c['speed']:6.1f}mb/s  得分: {c['score']:.3f}")
+    
+    os.makedirs(os.path.dirname(OUTPUT_FILE), exist_ok=True)
+    with open(OUTPUT_FILE, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(lines))
+    
+    log("=" * 50)
+    log(f"🎉 成功！已将 {len(lines)} 个 IP 写入 {OUTPUT_FILE}")
+    log("=" * 50)
 
 
 if __name__ == "__main__":
