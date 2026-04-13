@@ -5,7 +5,6 @@ Cloudflare 优选 IP 抓取脚本（Selenium 版本）
 适配 GitHub Actions 环境
 """
 
-import re
 import os
 import sys
 import time
@@ -36,22 +35,15 @@ def create_driver():
     """创建并配置 Chrome 驱动（适配 GitHub Actions 环境）"""
     options = Options()
     
-    # GitHub Actions 必需参数
     options.add_argument('--headless')
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
     options.add_argument('--disable-gpu')
     options.add_argument('--window-size=1920,1080')
-    
-    # 反爬虫伪装
     options.add_argument('--disable-blink-features=AutomationControlled')
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
     options.add_experimental_option('useAutomationExtension', False)
-    
-    # 添加 User-Agent
     options.add_argument('--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
-    
-    # 禁用日志输出
     options.add_argument('--log-level=3')
     options.add_argument('--silent')
     
@@ -66,83 +58,85 @@ def fetch_table_data():
         log(f"正在加载页面: {URL}")
         driver.get(URL)
         
-        # 等待表格加载完成
         WebDriverWait(driver, 30).until(
             EC.presence_of_element_located((By.TAG_NAME, "table"))
         )
         time.sleep(3)
         
-        # 获取表格所有行
         table = driver.find_element(By.TAG_NAME, "table")
         rows = table.find_elements(By.TAG_NAME, "tr")
         
-        log(f"总共找到 {len(rows)} 行（含表头）")
+        log(f"总共找到 {len(rows)} 行")
         
-        # 跳过表头（第一行）
-        data_rows = rows[1:]
+        # 分析表头，确定各列的位置
+        header_row = rows[0]
+        header_cells = header_row.find_elements(By.TAG_NAME, "th")
+        if not header_cells:
+            header_cells = header_row.find_elements(By.TAG_NAME, "td")
+        
+        # 打印表头，用于调试
+        header_texts = [cell.text.strip() for cell in header_cells]
+        log(f"表头列数: {len(header_texts)}")
+        log(f"表头内容: {header_texts}")
+        
+        # 找出关键列的索引
+        ip_idx = None
+        latency_idx = None
+        speed_idx = None
+        isp_idx = None
+        
+        for i, text in enumerate(header_texts):
+            if 'IP' in text or 'ip' in text:
+                ip_idx = i
+            elif '延迟' in text or 'latency' in text.lower():
+                latency_idx = i
+            elif '速度' in text or 'speed' in text.lower():
+                speed_idx = i
+            elif '线路' in text or 'isp' in text.lower():
+                isp_idx = i
+        
+        # 如果没有"线路"列，则通过其他方式判断
+        if isp_idx is None:
+            log("未找到'线路'列，将使用 IP 段经验判断运营商")
+        
+        log(f"列索引: IP={ip_idx}, 延迟={latency_idx}, 速度={speed_idx}, 线路={isp_idx}")
         
         candidates = []
         seen_ips = set()
         
-        # 调试：打印前3行的列数和内容
-        for i, row in enumerate(data_rows[:3]):
-            cols = row.find_elements(By.TAG_NAME, "td")
-            log(f"调试：第 {i+1} 行有 {len(cols)} 列")
-            if len(cols) >= 6:
-                log(f"  列1(线路): '{cols[1].text.strip()}'")
-                log(f"  列2(IP): '{cols[2].text.strip()}'")
-                log(f"  列3(丢包): '{cols[3].text.strip()}'")
-                log(f"  列4(延迟): '{cols[4].text.strip()}'")
-                log(f"  列5(速度): '{cols[5].text.strip()}'")
-        
-        for row in data_rows:
+        for row in rows[1:]:  # 跳过表头
             try:
-                cols = row.find_elements(By.TAG_NAME, "td")
-                
-                # 跳过列数不足的行
-                if len(cols) < 6:
+                cells = row.find_elements(By.TAG_NAME, "td")
+                if len(cells) < max([idx for idx in [ip_idx, latency_idx, speed_idx] if idx is not None]) + 1:
                     continue
                 
-                # 表格结构：
-                # 0:序号 | 1:线路 | 2:IP | 3:丢包 | 4:延迟 | 5:速度 | 6:带宽 | 7:Colo | 8:时间
-                line_type = cols[1].text.strip()
-                ip = cols[2].text.strip()
-                loss_text = cols[3].text.strip()
-                latency_text = cols[4].text.strip()
-                speed_text = cols[5].text.strip()
-                
-                # 跳过 IPv6
-                if ':' in ip:
+                # 提取 IP
+                ip = cells[ip_idx].text.strip() if ip_idx is not None else ''
+                if ':' in ip or not ip:
                     continue
                 
-                # 跳过空 IP
-                if not ip:
-                    continue
+                # 提取线路（如果有）
+                isp = cells[isp_idx].text.strip() if isp_idx is not None else '多线'
                 
-                # 解析数值
+                # 提取延迟
+                latency_text = cells[latency_idx].text.strip() if latency_idx is not None else ''
                 try:
-                    loss = float(loss_text.replace('%', ''))
-                except:
-                    loss = 100
-                
-                try:
-                    latency = float(latency_text.replace('ms', ''))
+                    latency = float(latency_text.replace('ms', '').strip())
                 except:
                     latency = 999
                 
+                # 提取速度
+                speed_text = cells[speed_idx].text.strip() if speed_idx is not None else ''
                 try:
-                    speed = float(speed_text.lower().replace('mb/s', '').replace('mb', ''))
+                    speed = float(speed_text.lower().replace('mb/s', '').replace('mb', '').strip())
                 except:
                     speed = 0
                 
-                # 调试：打印第一行的解析结果和筛选条件检查
+                # 调试第一行
                 if len(candidates) == 0 and len(seen_ips) == 0:
-                    log(f"调试：解析第一行 - IP:{ip}, 线路:{line_type}, 丢包:{loss}, 延迟:{latency}, 速度:{speed}")
-                    log(f"  筛选条件检查: 丢包>0 = {loss>0}, 延迟>{MAX_LATENCY} = {latency>MAX_LATENCY}, 速度<{MIN_SPEED} = {speed<MIN_SPEED}")
+                    log(f"调试：第一行解析 - IP:{ip}, 线路:{isp}, 延迟:{latency}, 速度:{speed}")
                 
                 # 筛选条件
-                if loss > 0:
-                    continue
                 if latency > MAX_LATENCY:
                     continue
                 if speed < MIN_SPEED:
@@ -152,14 +146,11 @@ def fetch_table_data():
                 
                 seen_ips.add(ip)
                 
-                # 使用页面标注的线路类型
-                isp = line_type if line_type not in ['IPV6', '多线'] else '多线'
-                
                 candidates.append({
                     'ip': ip,
                     'latency': latency,
                     'speed': speed,
-                    'isp': isp
+                    'isp': isp if isp not in ['IPV6', ''] else '多线'
                 })
                 
             except Exception as e:
@@ -191,7 +182,7 @@ def sort_by_score(candidates):
 def main():
     log("=" * 50)
     log("开始获取 Cloudflare 优选 IP（GitHub Actions + Selenium）")
-    log(f"筛选条件: 延迟 ≤ {MAX_LATENCY}ms, 速度 ≥ {MIN_SPEED}mb/s, 0% 丢包")
+    log(f"筛选条件: 延迟 ≤ {MAX_LATENCY}ms, 速度 ≥ {MIN_SPEED}mb/s")
     log("=" * 50)
     
     try:
@@ -211,17 +202,14 @@ def main():
             f.write("# No IPs found matching criteria\n")
         sys.exit(0)
     
-    # 按得分排序，取前 N 个
     top_ips = sort_by_score(candidates)[:MAX_RESULTS]
     
-    # 生成输出行
     lines = []
     for c in top_ips:
         line = f"{c['ip']}:{TARGET_PORT}#{c['isp']}"
         lines.append(line)
         log(f"📌 {c['ip']:15} [{c['isp']:6}] 延迟: {c['latency']:6.1f}ms  速度: {c['speed']:6.1f}mb/s  得分: {c['score']:.3f}")
     
-    # 写入文件
     os.makedirs(os.path.dirname(OUTPUT_FILE), exist_ok=True)
     with open(OUTPUT_FILE, 'w', encoding='ascii') as f:
         f.write('\n'.join(lines))
