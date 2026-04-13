@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Cloudflare 优选 IP 抓取脚本
+Cloudflare 优选 IP 抓取脚本（Selenium 版本）
 适配 GitHub Actions 环境
 """
 
@@ -19,11 +19,11 @@ from selenium.webdriver.support import expected_conditions as EC
 
 # --- 配置 ---
 URL = "https://api.uouin.com/cloudflare.html"
-OUTPUT_FILE = "output/cf_preferred_ips.txt"  # 相对于仓库根目录
+OUTPUT_FILE = "output/cf_preferred_ips.txt"
 TARGET_PORT = "443"
-MAX_RESULTS = 30
-MAX_LATENCY = 300  # 最大延迟 300ms
-MIN_SPEED = 5      # 最低速度 5mb/s
+MAX_RESULTS = 40
+MAX_LATENCY = 300   # 最大延迟 300ms
+MIN_SPEED = 5       # 最低速度 5mb/s
 
 
 def log(msg):
@@ -37,11 +37,11 @@ def create_driver():
     options = Options()
     
     # GitHub Actions 必需参数
-    options.add_argument('--headless')               # 无头模式
-    options.add_argument('--no-sandbox')             # 禁用沙箱（CI 环境必需）
-    options.add_argument('--disable-dev-shm-usage')  # 解决内存不足问题
-    options.add_argument('--disable-gpu')            # 禁用 GPU 加速
-    options.add_argument('--window-size=1920,1080')  # 设置窗口大小
+    options.add_argument('--headless')
+    options.add_argument('--no-sandbox')
+    options.add_argument('--disable-dev-shm-usage')
+    options.add_argument('--disable-gpu')
+    options.add_argument('--window-size=1920,1080')
     
     # 反爬虫伪装
     options.add_argument('--disable-blink-features=AutomationControlled')
@@ -84,47 +84,60 @@ def fetch_table_data():
         for row in rows:
             try:
                 cols = row.find_elements(By.TAG_NAME, "td")
-                if len(cols) < 5:
+                if len(cols) < 6:
                     continue
                 
                 # 解析各列数据
-                isp = cols[0].text.strip()
-                ip = cols[1].text.strip()
+                # 表格结构：序号 | 线路 | IP | 丢包 | 延迟 | 速度 | 带宽 | Colo | 时间
+                line_type = cols[1].text.strip()      # 线路类型
+                ip = cols[2].text.strip()             # IP 地址
+                loss_text = cols[3].text.strip()      # 丢包率
+                latency_text = cols[4].text.strip()   # 延迟
+                speed_text = cols[5].text.strip()     # 速度
                 
-                # 丢包率
-                loss_text = cols[2].text.strip().replace('%', '')
-                loss = float(loss_text) if loss_text else 100
+                # 跳过 IPv6
+                if ':' in ip:
+                    continue
                 
-                # 延迟
-                lat_text = cols[3].text.strip().replace('ms', '')
-                lat = float(lat_text) if lat_text else 999
+                # 解析数值
+                try:
+                    loss = float(loss_text.replace('%', ''))
+                except:
+                    loss = 100
                 
-                # 速度
-                spd_text = cols[4].text.strip().replace('mb/s', '').replace('mb', '').replace('MB/s', '').replace('MB', '')
-                spd = float(spd_text) if spd_text else 0
+                try:
+                    latency = float(latency_text.replace('ms', ''))
+                except:
+                    latency = 999
+                
+                try:
+                    speed = float(speed_text.replace('mb/s', '').replace('MB/s', ''))
+                except:
+                    speed = 0
                 
                 # 筛选条件
-                if ':' in ip:  # 跳过带端口的 IP
-                    continue
                 if loss > 0:
                     continue
-                if lat > MAX_LATENCY:
+                if latency > MAX_LATENCY:
                     continue
-                if spd < MIN_SPEED:
+                if speed < MIN_SPEED:
                     continue
                 if ip in seen_ips:
                     continue
                 
                 seen_ips.add(ip)
+                
+                # 使用页面标注的线路类型
+                isp = line_type if line_type not in ['IPV6', '多线'] else '多线'
+                
                 candidates.append({
                     'ip': ip,
-                    'latency': lat,
-                    'speed': spd,
-                    'isp': isp if isp else 'CF'
+                    'latency': latency,
+                    'speed': speed,
+                    'isp': isp
                 })
                 
             except Exception as e:
-                log(f"解析行数据时出错: {e}")
                 continue
         
         return candidates
@@ -142,7 +155,6 @@ def sort_by_score(candidates):
     max_spd = max(c['speed'] for c in candidates)
     
     for c in candidates:
-        # 延迟越低越好，速度越高越好
         latency_score = 1 - (c['latency'] / max_lat) if max_lat > 0 else 0
         speed_score = c['speed'] / max_spd if max_spd > 0 else 0
         c['score'] = 0.5 * latency_score + 0.5 * speed_score
@@ -152,7 +164,7 @@ def sort_by_score(candidates):
 
 def main():
     log("=" * 50)
-    log("开始获取 Cloudflare 优选 IP（GitHub Actions 环境）")
+    log("开始获取 Cloudflare 优选 IP（GitHub Actions + Selenium）")
     log(f"筛选条件: 延迟 ≤ {MAX_LATENCY}ms, 速度 ≥ {MIN_SPEED}mb/s, 0% 丢包")
     log("=" * 50)
     
@@ -168,7 +180,6 @@ def main():
     
     if not candidates:
         log("⚠️ 警告：未找到符合条件的 IP")
-        # 即使没有结果也创建一个空文件，避免工作流报错
         os.makedirs(os.path.dirname(OUTPUT_FILE), exist_ok=True)
         with open(OUTPUT_FILE, 'w', encoding='ascii') as f:
             f.write("# No IPs found matching criteria\n")
@@ -182,7 +193,7 @@ def main():
     for c in top_ips:
         line = f"{c['ip']}:{TARGET_PORT}#{c['isp']}"
         lines.append(line)
-        log(f"📌 已选择 - {c['ip']:15} [{c['isp']:6}] 延迟: {c['latency']:6.1f}ms  速度: {c['speed']:6.1f}mb/s  得分: {c['score']:.3f}")
+        log(f"📌 {c['ip']:15} [{c['isp']:6}] 延迟: {c['latency']:6.1f}ms  速度: {c['speed']:6.1f}mb/s  得分: {c['score']:.3f}")
     
     # 写入文件
     os.makedirs(os.path.dirname(OUTPUT_FILE), exist_ok=True)
