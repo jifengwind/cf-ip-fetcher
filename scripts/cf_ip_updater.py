@@ -27,7 +27,7 @@ MAX_LATENCY = 300   # 最大延迟 300ms
 MIN_SPEED = 5       # 最低速度 5mb/s
 
 # --- 新增：补救机制配置 ---
-CHECK_INTERVAL_MINUTES = 120  # 超过此时间未更新则触发补救（与 cron 频率保持一致）
+CHECK_INTERVAL_MINUTES = 30  # 超过此时间未更新则触发补救（与 cron 频率保持一致）
 
 
 def log(msg):
