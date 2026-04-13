@@ -2,7 +2,7 @@ name: Fetch Cloudflare Preferred IPs
 
 on:
   schedule:
-    - cron: '7,37 */2 * * *'
+    - cron: '17 */2 * * *'
   workflow_dispatch:
   push:
     branches:
