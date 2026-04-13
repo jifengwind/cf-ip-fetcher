@@ -8,8 +8,9 @@ on:
     branches:
       - main
     paths:
-      - 'speedtest.js'
+      - 'scripts/cf_ip_updater.py'
       - '.github/workflows/fetch-ips.yml'
+      - 'requirements.txt'
 
 permissions:
   contents: write
@@ -22,22 +23,57 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
-          node-version: '20'
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install Google Chrome
+        run: |
+          sudo apt update
+          sudo apt install -y wget unzip
+          wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
+          echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
+          sudo apt update
+          sudo apt install -y google-chrome-stable
+          google-chrome --version
+
+      - name: Install ChromeDriver
+        run: |
+          CHROME_VERSION=$(google-chrome --version | grep -oP '\d+\.\d+\.\d+\.\d+')
+          echo "Chrome 版本: $CHROME_VERSION"
+          wget -O /tmp/chromedriver.zip "https://storage.googleapis.com/chrome-for-testing-public/$CHROME_VERSION/linux64/chromedriver-linux64.zip"
+          unzip -o /tmp/chromedriver.zip -d /tmp/
+          sudo mv /tmp/chromedriver-linux64/chromedriver /usr/local/bin/
+          sudo chmod +x /usr/local/bin/chromedriver
+          chromedriver --version
+
+      - name: Create output directory
+        run: mkdir -p output
 
       - name: Run IP fetcher script
-        run: node speedtest.js
+        run: python scripts/cf_ip_updater.py
 
       - name: Commit and push changes
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          if git diff --quiet ips.txt; then
+          if git diff --quiet output/cf_preferred_ips.txt; then
             echo "IP 列表无变化，跳过提交"
           else
-            git add ips.txt last-update.txt
+            git add output/cf_preferred_ips.txt
             git commit -m "🔄 Auto-update: preferred IPs [$(date +'%Y-%m-%d %H:%M UTC')]"
             git push
           fi
+
+      - name: Upload IP list as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cf-preferred-ips
+          path: output/cf_preferred_ips.txt
+          retention-days: 7
