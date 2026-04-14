@@ -1,6 +1,9 @@
 name: Fetch Cloudflare Preferred IPs
 
 on:
+  repository_dispatch:
+    types: [cf-cron-trigger]
+  # 原有的其他触发条件保留...
   schedule:
     - cron: '17 */2 * * *'
   workflow_dispatch:
