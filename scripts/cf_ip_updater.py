@@ -22,7 +22,7 @@ OUTPUT_FILE = "output/cf_preferred_ips.txt"
 TARGET_PORT = "443"
 MAX_RESULTS = 40
 MAX_LATENCY = 300   # 最大延迟 300ms
-MIN_SPEED = 30       # 最低速度 30mb/s
+MIN_SPEED = 5       # 最低速度 5mb/s
 
 
 def log(msg):
