@@ -62,13 +62,28 @@ jobs:
       - name: Run IP fetcher script
         run: python scripts/cf_ip_updater.py
 
+      - name: Process and deduplicate cumulative IPs
+        run: |
+          # 确保累积文件存在
+          touch output/cf_preferred_ips_dj.txt
+          
+          # 将新采集的 IP 追加到累积文件
+          cat output/cf_preferred_ips.txt >> output/cf_preferred_ips_dj.txt
+          
+          # 对累积文件进行去重并排序
+          sort -u output/cf_preferred_ips_dj.txt -o output/cf_preferred_ips_dj.txt
+          
+          # 可选：移除空行
+          sed -i '/^$/d' output/cf_preferred_ips_dj.txt
+
       - name: Commit and push changes
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           
-          # 强制添加文件
+          # 强制添加文件（包括新增的累积文件）
           git add output/cf_preferred_ips.txt
+          git add output/cf_preferred_ips_dj.txt
           
           # 检查是否有变化
           if git diff --cached --quiet; then
@@ -84,5 +99,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: cf-preferred-ips
-          path: output/cf_preferred_ips.txt
+          path: |
+            output/cf_preferred_ips.txt
+            output/cf_preferred_ips_dj.txt
           retention-days: 7
