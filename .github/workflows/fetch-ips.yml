@@ -21,7 +21,7 @@ permissions:
 jobs:
   fetch-ips:
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -36,24 +36,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Install Google Chrome
-        run: |
-          sudo apt update
-          sudo apt install -y wget unzip
-          wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
-          echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
-          sudo apt update
-          sudo apt install -y google-chrome-stable
-          google-chrome --version
+      - name: Setup Chrome and ChromeDriver
+        uses: browser-actions/setup-chrome@v2
+        with:
+          chrome-version: stable
+          install-chromedriver: true
 
-      - name: Install ChromeDriver
+      - name: Verify Chrome and ChromeDriver
         run: |
-          CHROME_VERSION=$(google-chrome --version | grep -oP '\d+\.\d+\.\d+\.\d+')
-          echo "Chrome 版本: $CHROME_VERSION"
-          wget -O /tmp/chromedriver.zip "https://storage.googleapis.com/chrome-for-testing-public/$CHROME_VERSION/linux64/chromedriver-linux64.zip"
-          unzip -o /tmp/chromedriver.zip -d /tmp/
-          sudo mv /tmp/chromedriver-linux64/chromedriver /usr/local/bin/
-          sudo chmod +x /usr/local/bin/chromedriver
+          chrome --version
           chromedriver --version
 
       - name: Create output directory
@@ -66,13 +57,13 @@ jobs:
         run: |
           # 确保累积文件存在
           touch output/cf_preferred_ips_dj.txt
-          
+
           # 将新采集的 IP 追加到累积文件
           cat output/cf_preferred_ips.txt >> output/cf_preferred_ips_dj.txt
-          
+
           # 对累积文件进行去重并排序
           sort -u output/cf_preferred_ips_dj.txt -o output/cf_preferred_ips_dj.txt
-          
+
           # 可选：移除空行
           sed -i '/^$/d' output/cf_preferred_ips_dj.txt
 
@@ -80,19 +71,19 @@ jobs:
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          
+
           # 强制添加文件（包括新增的累积文件）
           git add output/cf_preferred_ips.txt
           git add output/cf_preferred_ips_dj.txt
-          
+
           # 检查是否有变化
           if git diff --cached --quiet; then
-            echo "文件内容无变化，但强制提交以同步远程仓库" 
+            echo "文件内容无变化，但强制提交以同步远程仓库"
             git commit --allow-empty -m "🔄 Auto-update: preferred IPs (force sync) [$(date +'%Y-%m-%d %H:%M UTC')]"
           else
             git commit -m "🔄 Auto-update: preferred IPs [$(date +'%Y-%m-%d %H:%M UTC')]"
           fi
-          
+
           git push
 
       - name: Upload IP list as artifact
