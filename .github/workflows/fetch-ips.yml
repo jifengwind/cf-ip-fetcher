@@ -47,13 +47,15 @@ jobs:
         run: |
           chrome --version
           chromedriver --version
-          echo "ChromeDriver output path: ${{ steps.chrome.outputs.chromedriver-path }}"
+          echo "Chrome path: ${{ steps.chrome.outputs.chrome-path }}"
+          echo "ChromeDriver path: ${{ steps.chrome.outputs.chromedriver-path }}"
 
       - name: Create output directory
         run: mkdir -p output
 
       - name: Run IP fetcher script
         env:
+          CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
           CHROMEDRIVER_PATH: ${{ steps.chrome.outputs.chromedriver-path }}
         run: python scripts/cf_ip_updater.py
 
