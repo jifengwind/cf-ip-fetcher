@@ -46,7 +46,15 @@ def create_driver():
     options.add_argument('--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
     options.add_argument('--log-level=3')
 
-    # 优先使用工作流传入的驱动路径；路径无效时回退到 Selenium Manager
+    # 1. 强制使用 Action 安装的 Chrome 二进制，避免命中系统旧版 Chrome
+    chrome_path = os.environ.get("CHROME_PATH")
+    if chrome_path and os.path.isfile(chrome_path):
+        log(f"使用 Chrome 二进制文件: {chrome_path}")
+        options.binary_location = chrome_path
+    else:
+        log("CHROME_PATH 未设置或文件不存在，将使用系统默认 Chrome")
+
+    # 2. 优先使用 Action 安装的 ChromeDriver；无效时回退 Selenium Manager
     driver_path = os.environ.get("CHROMEDRIVER_PATH")
     if driver_path and os.path.isfile(driver_path):
         log(f"使用 ChromeDriver: {driver_path}")
