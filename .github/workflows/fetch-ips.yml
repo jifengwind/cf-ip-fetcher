@@ -37,6 +37,7 @@ jobs:
           pip install -r requirements.txt
 
       - name: Setup Chrome and ChromeDriver
+        id: chrome
         uses: browser-actions/setup-chrome@v2
         with:
           chrome-version: stable
@@ -46,11 +47,14 @@ jobs:
         run: |
           chrome --version
           chromedriver --version
+          echo "ChromeDriver output path: ${{ steps.chrome.outputs.chromedriver-path }}"
 
       - name: Create output directory
         run: mkdir -p output
 
       - name: Run IP fetcher script
+        env:
+          CHROMEDRIVER_PATH: ${{ steps.chrome.outputs.chromedriver-path }}
         run: python scripts/cf_ip_updater.py
 
       - name: Process and deduplicate cumulative IPs
